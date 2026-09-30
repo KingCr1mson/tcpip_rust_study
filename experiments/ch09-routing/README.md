@@ -150,6 +150,28 @@ server 不监听 TCP/9005。client 尝试建立连接后，server 内核应直�
 
 查看抓包：
 
+
+## 第 20 章实验
+
+### TCP 成块数据流
+
 ```bash
-tcpdump -r captures/ch18-tcp-reset.pcap -nn -e -v
+make experiment EXP=ch20-tcp-stream
 ```
+
+client 通过 TCP 向 server 发送 1 MiB 数据，server 统计收到的字节数。router 抓包保存为 `captures/ch20-tcp-stream.pcap`。
+
+预期观察：
+
+- TCP 通过多个报文传输连续的序列空间
+- ACK 号随着数据接收推进
+- TCP 首部包含 advertised window
+- server 最终收到完整的 1048576 字节
+
+查看抓包：
+
+```bash
+tcpdump -r captures/ch20-tcp-stream.pcap -nn -e -v
+```
+
+注意：Linux 网卡的 TSO/GSO 等卸载功能可能影响抓包中报文的分段表现；本实验用于观察 TCP 成块传输逻辑，不用于测量真实网卡性能。
