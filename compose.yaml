@@ -1,0 +1,45 @@
+services:
+  client:
+    build: ./docker/lab
+    command: ["sleep", "infinity"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      net_client:
+        ipv4_address: 10.0.1.10
+
+  router:
+    build: ./docker/lab
+    privileged: true
+    command: ["sleep", "infinity"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./captures:/captures
+    networks:
+      net_client:
+        ipv4_address: 10.0.1.2
+      net_server:
+        ipv4_address: 10.0.2.2
+
+  server:
+    build: ./docker/lab
+    command: ["sleep", "infinity"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      net_server:
+        ipv4_address: 10.0.2.10
+
+networks:
+  net_client:
+    ipam:
+      config:
+        - subnet: 10.0.1.0/24
+  net_server:
+    ipam:
+      config:
+        - subnet: 10.0.2.0/24

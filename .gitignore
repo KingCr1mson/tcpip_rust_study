@@ -1,0 +1,6 @@
+# Rust 构建缓存和实验产物
+/target/
+Cargo.lock
+captures/*.pcap
+reports/*.json
+reports/*.md

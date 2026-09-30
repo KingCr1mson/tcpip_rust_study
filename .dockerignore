@@ -1,0 +1,5 @@
+target
+captures/*.pcap
+reports/*.json
+reports/*.md
+.git
