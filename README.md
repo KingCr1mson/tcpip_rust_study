@@ -59,4 +59,4 @@ Rust 代码尽量保持简单，当前只使用标准库。宿主机有 Cargo �
 cargo run -- ch09-default-route
 ```
 
-没有 Cargo 时，Makefile 会使用官方 Rust Docker 镜像构建并运行工具。
+没有 Cargo 时，Makefile 会使用 Rust Docker 镜像构建工具；项目中的 `.cargo/config.toml` 会让 Cargo 使用 rsproxy sparse 镜像。
