@@ -60,6 +60,23 @@ make experiment EXP=ch11-udp-unicast
 
 查看报文：
 
+### UDP 端口不可达
+
 ```bash
-tcpdump -r captures/ch11-udp-unicast.pcap -nn -e -X
+make experiment EXP=ch11-udp-port-unreachable
+```
+
+这个实验不在 server 上监听 UDP/9001。client 发送 UDP 数据后，server 内核应返回 ICMP Destination Unreachable / Port Unreachable。router 的 client 侧接口抓取 UDP 请求和返回的 ICMP 报文。
+
+预期观察：
+
+- client 先发送 UDP 数据报
+- server 没有 UDP/9001 监听者
+- server 返回 ICMP 端口不可达
+- ICMP 报文经过 router 返回 client
+
+查看抓包：
+
+```bash
+tcpdump -r captures/ch11-udp-port-unreachable.pcap -nn -e
 ```

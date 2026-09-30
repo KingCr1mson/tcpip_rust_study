@@ -11,6 +11,7 @@ const SERVER_IP: &str = "10.0.2.10";
 const ROUTER_CLIENT_IP: &str = "10.0.1.2";
 const ROUTER_SERVER_IP: &str = "10.0.2.2";
 const UDP_PORT: &str = "9000";
+const UDP_UNREACHABLE_PORT: &str = "9001";
 const UDP_MESSAGE: &str = "netlab udp chapter 11\n";
 fn main() {
     let scenario = match env::args().nth(1) {
@@ -30,6 +31,9 @@ fn main() {
 fn run(scenario: &str) -> Result<(), String> {
     if scenario == "ch11-udp-unicast" {
         return run_udp_unicast();
+    }
+    if scenario == "ch11-udp-port-unreachable" {
+        return run_udp_port_unreachable();
     }
 
     check_scenario(scenario)?;
@@ -133,9 +137,51 @@ fn run_udp_unicast() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -X 查看 UDP 数据");
     Ok(())
 }
+fn run_udp_port_unreachable() -> Result<(), String> {
+    run_command("docker", &["compose", "up", "-d"])?;
+    configure_router()?;
+    configure_routes("ch09-default-route")?;
+
+    let capture_path = "captures/ch11-udp-port-unreachable.pcap";
+    let capture_file = File::create(capture_path)
+        .map_err(|error| format!("无法创建抓包文件 {capture_path}: {error}"))?;
+    let mut capture = Command::new("docker")
+        .args(["compose", "exec", "-T", ROUTER, "sh", "-c"])
+        .arg("timeout 8 tcpdump -i eth0 -U -w - 'udp or icmp'")
+        .stdout(Stdio::from(capture_file))
+        .spawn()
+        .map_err(|error| format!("无法启动抓包: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    let client = Command::new("docker")
+        .args(["compose", "exec", "-T", CLIENT, "sh", "-c"])
+        .arg(format!("printf '{UDP_MESSAGE}' | nc -u -w 2 {SERVER_IP} {UDP_UNREACHABLE_PORT}"))
+        .status()
+        .map_err(|error| format!("无法发送 UDP 数据: {error}"))?;
+
+    capture
+        .wait()
+        .map_err(|error| format!("等待抓包结束失败: {error}"))?;
+
+    if !client.success() {
+        return Err("UDP 客户端发送失败".to_string());
+    }
+
+    let packets = run_command_output("tcpdump", &["-r", capture_path, "-nn"])?;
+    let has_udp = packets.contains("UDP") || packets.contains("udp");
+    let has_icmp = packets.contains("unreachable") || packets.contains("ICMP");
+    if !has_udp || !has_icmp {
+        return Err(format!("抓包没有同时发现 UDP 和 ICMP 端口不可达:\n{packets}"));
+    }
+
+    println!("验证通过: 未监听的 UDP 端口返回 ICMP 端口不可达");
+    println!("抓包文件: {capture_path}");
+    println!("可以使用 tcpdump -r {capture_path} -nn -e 查看 UDP 和 ICMP");
+    Ok(())
+}
 fn check_scenario(scenario: &str) -> Result<(), String> {
     match scenario {
-        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" => Ok(()),
+        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" => Ok(()),
         _ => Err(format!("未知实验: {scenario}")),
     }
 }
