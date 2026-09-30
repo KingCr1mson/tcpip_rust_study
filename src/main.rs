@@ -20,6 +20,8 @@ const TCP_CLOSE_PORT: &str = "9004";
 const TCP_RESET_PORT: &str = "9005";
 const TCP_STREAM_PORT: &str = "9006";
 const TCP_STREAM_SIZE: &str = "1048576";
+const TCP_RETRANSMIT_PORT: &str = "9007";
+const TCP_RETRANSMIT_SIZE: &str = "65536";
 const UDP_MESSAGE: &str = "netlab udp chapter 11\n";
 fn main() {
     let scenario = match env::args().nth(1) {
@@ -57,6 +59,9 @@ fn run(scenario: &str) -> Result<(), String> {
     }
     if scenario == "ch20-tcp-stream" {
         return run_tcp_stream();
+    }
+    if scenario == "ch21-tcp-retransmission" {
+        return run_tcp_retransmission();
     }
 
     check_scenario(scenario)?;
@@ -474,9 +479,86 @@ fn run_tcp_stream() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看 sequence、ack 和 window");
     Ok(())
 }
+fn run_tcp_retransmission() -> Result<(), String> {
+    run_command("docker", &["compose", "up", "-d"])?;
+    configure_router()?;
+    configure_routes("ch09-default-route")?;
+
+    let capture_path = "captures/ch21-tcp-retransmission.pcap";
+    let capture_file = File::create(capture_path)
+        .map_err(|error| format!("无法创建抓包文件 {capture_path}: {error}"))?;
+    let mut capture = Command::new("docker")
+        .args(["compose", "exec", "-T", ROUTER, "sh", "-c"])
+        .arg(format!("timeout 15 tcpdump -i eth0 -U -w - 'tcp port {TCP_RETRANSMIT_PORT}'"))
+        .stdout(Stdio::from(capture_file))
+        .spawn()
+        .map_err(|error| format!("无法启动抓包: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    let server = Command::new("docker")
+        .args(["compose", "exec", "-T", SERVER, "sh", "-c"])
+        .arg(format!("timeout 12 nc -l -p {TCP_RETRANSMIT_PORT} | wc -c"))
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("无法启动 TCP 接收端: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    let mut client = Command::new("docker")
+        .args(["compose", "exec", "-T", CLIENT, "sh", "-c"])
+        .arg(format!("(sleep 2; head -c {TCP_RETRANSMIT_SIZE} /dev/zero) | nc -w 10 {SERVER_IP} {TCP_RETRANSMIT_PORT}"))
+        .spawn()
+        .map_err(|error| format!("无法启动 TCP 客户端: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    run_command("docker", &["compose", "exec", "-T", ROUTER, "tc", "qdisc", "add", "dev", "eth1", "root", "netem", "loss", "100%"]) ?;
+    thread::sleep(Duration::from_secs(3));
+    run_command_allow_failure("docker", &["compose", "exec", "-T", ROUTER, "tc", "qdisc", "del", "dev", "eth1", "root"]);
+
+    let client_status = client
+        .wait()
+        .map_err(|error| format!("等待 TCP 客户端失败: {error}"))?;
+    let output = server
+        .wait_with_output()
+        .map_err(|error| format!("等待 TCP 接收端失败: {error}"))?;
+    capture
+        .wait()
+        .map_err(|error| format!("等待抓包结束失败: {error}"))?;
+
+    let received = String::from_utf8_lossy(&output.stdout);
+    if !client_status.success() {
+        return Err("TCP 客户端发送失败".to_string());
+    }
+    if received.trim() != TCP_RETRANSMIT_SIZE {
+        return Err(format!("server 收到字节数不符: {received:?}"));
+    }
+
+    let packets = run_command_output("tcpdump", &["-r", capture_path, "-nn"])?;
+    let data_lines: Vec<&str> = packets
+        .lines()
+        .filter(|line| line.contains("seq ") && !line.contains("length 0"))
+        .collect();
+    let mut has_duplicate_sequence = false;
+    for (index, line) in data_lines.iter().enumerate() {
+        if data_lines[index + 1..].iter().any(|other| {
+            line.split("seq ").nth(1).and_then(|value| value.split(',').next())
+                == other.split("seq ").nth(1).and_then(|value| value.split(',').next())
+        }) {
+            has_duplicate_sequence = true;
+            break;
+        }
+    }
+    if !has_duplicate_sequence {
+        return Err(format!("抓包没有发现重复序列号的重传:\n{packets}"));
+    }
+
+    println!("验证通过: 丢包后 TCP 重传了相同序列号的数据");
+    println!("抓包文件: {capture_path}");
+    println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看重传间隔");
+    Ok(())
+}
 fn check_scenario(scenario: &str) -> Result<(), String> {
     match scenario {
-        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" | "ch17-tcp-handshake" | "ch18-tcp-close" | "ch18-tcp-reset" | "ch20-tcp-stream" => Ok(()),
+        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" | "ch17-tcp-handshake" | "ch18-tcp-close" | "ch18-tcp-reset" | "ch20-tcp-stream" | "ch21-tcp-retransmission" => Ok(()),
         _ => Err(format!("未知实验: {scenario}")),
     }
 }

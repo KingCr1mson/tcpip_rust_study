@@ -174,4 +174,26 @@ client 通过 TCP 向 server 发送 1 MiB 数据，server 统计收到的字节�
 tcpdump -r captures/ch20-tcp-stream.pcap -nn -e -v
 ```
 
-注意：Linux 网卡的 TSO/GSO 等卸载功能可能影响抓包中报文的分段表现；本实验用于观察 TCP 成块传输逻辑，不用于测量真实网卡性能。
+
+## 第 21 章实验
+
+### TCP 超时与重传
+
+```bash
+make experiment EXP=ch21-tcp-retransmission
+```
+
+实验在 TCP 连接建立后，使用 router 上的 `tc netem loss 30%` 注入丢包，再由 client 发送 65536 字节数据。server 统计接收长度，router 抓包保存为 `captures/ch21-tcp-retransmission.pcap`。
+
+预期观察：
+
+- 某个 TCP 数据段或 ACK 被丢弃
+- 后续报文中再次出现相同的序列号范围
+- 重传间隔由 TCP 定时器和 RTT 估计影响
+- server 最终仍收到完整数据
+
+查看抓包：
+
+```bash
+tcpdump -r captures/ch21-tcp-retransmission.pcap -nn -e -v
+```
