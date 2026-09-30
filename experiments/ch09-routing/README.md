@@ -115,8 +115,25 @@ server 监听 TCP/9003，client 建立连接并发送一行文本。router 抓�
 - TCP 连接建立后传输应用数据
 - TCP 报文包含序列号、确认号和窗口字段
 
+
+### TCP 连接终止
+
+```bash
+make experiment EXP=ch18-tcp-close
+```
+
+client 发送数据后关闭 TCP 连接，server 读到 EOF 后退出。router 抓包保存为 `captures/ch18-tcp-close.pcap`。
+
+预期观察：
+
+- 主动关闭方发送 FIN
+- 对端返回 ACK
+- 对端随后发送 FIN
+- 主动关闭方返回最后一个 ACK
+- 这对应 TCP 的四次挥手过程
+
 查看抓包：
 
 ```bash
-tcpdump -r captures/ch17-tcp-handshake.pcap -nn -e -v
+tcpdump -r captures/ch18-tcp-close.pcap -nn -e -v
 ```
