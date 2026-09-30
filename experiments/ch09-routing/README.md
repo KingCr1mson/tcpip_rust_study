@@ -96,6 +96,27 @@ make experiment EXP=ch11-udp-port-unreachable
 
 查看抓包：
 
+
+## 第 17、18 章实验
+
+### TCP 三次握手
+
 ```bash
-tcpdump -r captures/ch11-udp-port-unreachable.pcap -nn -e
+make experiment EXP=ch17-tcp-handshake
+```
+
+server 监听 TCP/9003，client 建立连接并发送一行文本。router 抓包保存为 `captures/ch17-tcp-handshake.pcap`。
+
+预期观察：
+
+- client 发送 SYN
+- server 返回 SYN/ACK
+- client 返回 ACK
+- TCP 连接建立后传输应用数据
+- TCP 报文包含序列号、确认号和窗口字段
+
+查看抓包：
+
+```bash
+tcpdump -r captures/ch17-tcp-handshake.pcap -nn -e -v
 ```

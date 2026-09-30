@@ -15,6 +15,7 @@ const UDP_UNREACHABLE_PORT: &str = "9001";
 const UDP_FRAGMENT_PORT: &str = "9002";
 const UDP_FRAGMENT_MTU: &str = "1200";
 const UDP_FRAGMENT_SIZE: &str = "3000";
+const TCP_HANDSHAKE_PORT: &str = "9003";
 const UDP_MESSAGE: &str = "netlab udp chapter 11\n";
 fn main() {
     let scenario = match env::args().nth(1) {
@@ -40,6 +41,9 @@ fn run(scenario: &str) -> Result<(), String> {
     }
     if scenario == "ch11-udp-fragmentation" {
         return run_udp_fragmentation();
+    }
+    if scenario == "ch17-tcp-handshake" {
+        return run_tcp_handshake();
     }
 
     check_scenario(scenario)?;
@@ -242,9 +246,67 @@ fn run_udp_fragmentation() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看分片字段");
     Ok(())
 }
+fn run_tcp_handshake() -> Result<(), String> {
+    run_command("docker", &["compose", "up", "-d"])?;
+    configure_router()?;
+    configure_routes("ch09-default-route")?;
+
+    let capture_path = "captures/ch17-tcp-handshake.pcap";
+    let capture_file = File::create(capture_path)
+        .map_err(|error| format!("无法创建抓包文件 {capture_path}: {error}"))?;
+    let mut capture = Command::new("docker")
+        .args(["compose", "exec", "-T", ROUTER, "sh", "-c"])
+        .arg(format!("timeout 8 tcpdump -i eth0 -U -w - 'tcp port {TCP_HANDSHAKE_PORT}'"))
+        .stdout(Stdio::from(capture_file))
+        .spawn()
+        .map_err(|error| format!("无法启动抓包: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    let server = Command::new("docker")
+        .args(["compose", "exec", "-T", SERVER, "sh", "-c"])
+        .arg(format!("timeout 5 nc -l -p {TCP_HANDSHAKE_PORT}"))
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("无法启动 TCP 服务: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    let client = Command::new("docker")
+        .args(["compose", "exec", "-T", CLIENT, "sh", "-c"])
+        .arg(format!("printf 'tcp handshake chapter 17\\n' | nc -w 2 {SERVER_IP} {TCP_HANDSHAKE_PORT}"))
+        .status()
+        .map_err(|error| format!("无法启动 TCP 客户端: {error}"))?;
+
+    let output = server
+        .wait_with_output()
+        .map_err(|error| format!("等待 TCP 服务失败: {error}"))?;
+    capture
+        .wait()
+        .map_err(|error| format!("等待抓包结束失败: {error}"))?;
+
+    let received = String::from_utf8_lossy(&output.stdout);
+    if !client.success() {
+        return Err("TCP 客户端连接或发送失败".to_string());
+    }
+    if !received.contains("tcp handshake chapter 17") {
+        return Err(format!("TCP 服务端没有收到预期数据: {received:?}"));
+    }
+
+    let packets = run_command_output("tcpdump", &["-r", capture_path, "-nn"])?;
+    let has_syn = packets.contains("Flags [S]");
+    let has_syn_ack = packets.contains("Flags [S.]");
+    let has_ack = packets.contains("Flags [.]");
+    if !has_syn || !has_syn_ack || !has_ack {
+        return Err(format!("抓包没有发现完整的 TCP 三次握手:\n{packets}"));
+    }
+
+    println!("验证通过: TCP 连接建立并观察到 SYN、SYN/ACK、ACK");
+    println!("抓包文件: {capture_path}");
+    println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看 TCP 首部");
+    Ok(())
+}
 fn check_scenario(scenario: &str) -> Result<(), String> {
     match scenario {
-        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" => Ok(()),
+        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" | "ch17-tcp-handshake" => Ok(()),
         _ => Err(format!("未知实验: {scenario}")),
     }
 }
