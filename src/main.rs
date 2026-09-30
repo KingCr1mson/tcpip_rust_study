@@ -17,6 +17,7 @@ const UDP_FRAGMENT_MTU: &str = "1200";
 const UDP_FRAGMENT_SIZE: &str = "3000";
 const TCP_HANDSHAKE_PORT: &str = "9003";
 const TCP_CLOSE_PORT: &str = "9004";
+const TCP_RESET_PORT: &str = "9005";
 const UDP_MESSAGE: &str = "netlab udp chapter 11\n";
 fn main() {
     let scenario = match env::args().nth(1) {
@@ -48,6 +49,9 @@ fn run(scenario: &str) -> Result<(), String> {
     }
     if scenario == "ch18-tcp-close" {
         return run_tcp_close();
+    }
+    if scenario == "ch18-tcp-reset" {
+        return run_tcp_reset();
     }
 
     check_scenario(scenario)?;
@@ -365,9 +369,51 @@ fn run_tcp_close() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看连接终止");
     Ok(())
 }
+fn run_tcp_reset() -> Result<(), String> {
+    run_command("docker", &["compose", "up", "-d"])?;
+    configure_router()?;
+    configure_routes("ch09-default-route")?;
+
+    let capture_path = "captures/ch18-tcp-reset.pcap";
+    let capture_file = File::create(capture_path)
+        .map_err(|error| format!("无法创建抓包文件 {capture_path}: {error}"))?;
+    let mut capture = Command::new("docker")
+        .args(["compose", "exec", "-T", ROUTER, "sh", "-c"])
+        .arg(format!("timeout 8 tcpdump -i eth0 -U -w - 'tcp port {TCP_RESET_PORT}'"))
+        .stdout(Stdio::from(capture_file))
+        .spawn()
+        .map_err(|error| format!("无法启动抓包: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    let client = Command::new("docker")
+        .args(["compose", "exec", "-T", CLIENT, "sh", "-c"])
+        .arg(format!("nc -w 2 {SERVER_IP} {TCP_RESET_PORT}"))
+        .status()
+        .map_err(|error| format!("无法启动 TCP 客户端: {error}"))?;
+
+    capture
+        .wait()
+        .map_err(|error| format!("等待抓包结束失败: {error}"))?;
+
+    if client.success() {
+        return Err("未监听的 TCP 端口却连接成功".to_string());
+    }
+
+    let packets = run_command_output("tcpdump", &["-r", capture_path, "-nn"])?;
+    let has_syn = packets.contains("Flags [S]");
+    let has_reset = packets.contains("Flags [R") || packets.contains("Flags [R.]");
+    if !has_syn || !has_reset {
+        return Err(format!("抓包没有发现 SYN 和 RST:\n{packets}"));
+    }
+
+    println!("验证通过: 未监听的 TCP 端口返回 RST");
+    println!("抓包文件: {capture_path}");
+    println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看 TCP RST");
+    Ok(())
+}
 fn check_scenario(scenario: &str) -> Result<(), String> {
     match scenario {
-        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" | "ch17-tcp-handshake" | "ch18-tcp-close" => Ok(()),
+        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" | "ch17-tcp-handshake" | "ch18-tcp-close" | "ch18-tcp-reset" => Ok(()),
         _ => Err(format!("未知实验: {scenario}")),
     }
 }

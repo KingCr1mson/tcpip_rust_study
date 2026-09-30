@@ -132,8 +132,24 @@ client 发送数据后关闭 TCP 连接，server 读到 EOF 后退出。router �
 - 主动关闭方返回最后一个 ACK
 - 这对应 TCP 的四次挥手过程
 
+
+### TCP RST
+
+```bash
+make experiment EXP=ch18-tcp-reset
+```
+
+server 不监听 TCP/9005。client 尝试建立连接后，server 内核应直接返回 RST，表示该端口没有监听者。
+
+预期观察：
+
+- client 发送 SYN
+- server 返回 RST/ACK
+- 不会完成三次握手
+- 不会出现应用数据或 FIN 挥手
+
 查看抓包：
 
 ```bash
-tcpdump -r captures/ch18-tcp-close.pcap -nn -e -v
+tcpdump -r captures/ch18-tcp-reset.pcap -nn -e -v
 ```
