@@ -12,6 +12,9 @@ const ROUTER_CLIENT_IP: &str = "10.0.1.2";
 const ROUTER_SERVER_IP: &str = "10.0.2.2";
 const UDP_PORT: &str = "9000";
 const UDP_UNREACHABLE_PORT: &str = "9001";
+const UDP_FRAGMENT_PORT: &str = "9002";
+const UDP_FRAGMENT_MTU: &str = "1200";
+const UDP_FRAGMENT_SIZE: &str = "3000";
 const UDP_MESSAGE: &str = "netlab udp chapter 11\n";
 fn main() {
     let scenario = match env::args().nth(1) {
@@ -34,6 +37,9 @@ fn run(scenario: &str) -> Result<(), String> {
     }
     if scenario == "ch11-udp-port-unreachable" {
         return run_udp_port_unreachable();
+    }
+    if scenario == "ch11-udp-fragmentation" {
+        return run_udp_fragmentation();
     }
 
     check_scenario(scenario)?;
@@ -179,9 +185,66 @@ fn run_udp_port_unreachable() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e 查看 UDP 和 ICMP");
     Ok(())
 }
+fn run_udp_fragmentation() -> Result<(), String> {
+    run_command("docker", &["compose", "up", "-d"])?;
+    configure_router()?;
+    configure_routes("ch09-default-route")?;
+    run_command("docker", &["compose", "exec", "-T", CLIENT, "ip", "link", "set", "dev", "eth0", "mtu", UDP_FRAGMENT_MTU])?;
+
+    let capture_path = "captures/ch11-udp-fragmentation.pcap";
+    let capture_file = File::create(capture_path)
+        .map_err(|error| format!("无法创建抓包文件 {capture_path}: {error}"))?;
+    let mut capture = Command::new("docker")
+        .args(["compose", "exec", "-T", ROUTER, "sh", "-c"])
+        .arg("timeout 8 tcpdump -i eth0 -U -w - ip")
+        .stdout(Stdio::from(capture_file))
+        .spawn()
+        .map_err(|error| format!("无法启动抓包: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    let server = Command::new("docker")
+        .args(["compose", "exec", "-T", SERVER, "sh", "-c"])
+        .arg(format!("timeout 5 nc -u -l -p {UDP_FRAGMENT_PORT} | wc -c"))
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("无法启动 UDP 服务: {error}"))?;
+
+    thread::sleep(Duration::from_secs(1));
+    let client = Command::new("docker")
+        .args(["compose", "exec", "-T", CLIENT, "sh", "-c"])
+        .arg(format!("head -c {UDP_FRAGMENT_SIZE} /dev/zero | nc -u -w 2 {SERVER_IP} {UDP_FRAGMENT_PORT}"))
+        .status()
+        .map_err(|error| format!("无法发送大 UDP 数据报: {error}"))?;
+
+    let output = server
+        .wait_with_output()
+        .map_err(|error| format!("等待 UDP 服务失败: {error}"))?;
+    capture
+        .wait()
+        .map_err(|error| format!("等待抓包结束失败: {error}"))?;
+
+    if !client.success() {
+        return Err("UDP 客户端发送失败".to_string());
+    }
+    let received = String::from_utf8_lossy(&output.stdout);
+    if !received.trim().contains(UDP_FRAGMENT_SIZE) {
+        return Err(format!("server 没有重组出完整 UDP 数据，收到字节数: {received:?}"));
+    }
+
+    let packets = run_command_output("tcpdump", &["-r", capture_path, "-nn", "-v"])?;
+    let fragment_count = packets.lines().filter(|line| line.contains("offset") || line.contains("Flags [+")).count();
+    if fragment_count < 2 {
+        return Err(format!("抓包中没有发现至少两个 IPv4 分片:\n{packets}"));
+    }
+
+    println!("验证通过: {UDP_FRAGMENT_SIZE} 字节 UDP 数据被分片并在 server 重组");
+    println!("抓包文件: {capture_path}");
+    println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看分片字段");
+    Ok(())
+}
 fn check_scenario(scenario: &str) -> Result<(), String> {
     match scenario {
-        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" => Ok(()),
+        "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" => Ok(()),
         _ => Err(format!("未知实验: {scenario}")),
     }
 }

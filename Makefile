@@ -28,6 +28,6 @@ experiment: build
 		docker run --rm \
 			-v "$(PWD):/work" \
 			-w /work rust:1.82-bookworm \
-			bash -c 'cargo build'; \
+			bash -c 'cargo build' && \
 		./target/debug/netlab $(EXP); \
 	fi

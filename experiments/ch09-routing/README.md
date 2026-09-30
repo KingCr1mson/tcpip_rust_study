@@ -60,7 +60,26 @@ make experiment EXP=ch11-udp-unicast
 
 查看报文：
 
-### UDP 端口不可达
+### UDP 分片
+
+```bash
+make experiment EXP=ch11-udp-fragmentation
+```
+
+实验将 client 的 MTU 改为 1200，并发送 3000 字节 UDP 数据。抓包保存在 `captures/ch11-udp-fragmentation.pcap`。
+
+预期观察：
+
+- 一个 UDP 数据报被拆成多个 IPv4 分片
+- 首片包含 UDP 首部，后续分片由 IPv4 identification 和 fragment offset 关联
+- 除最后一个分片外，More Fragments 标志置位
+- server 收到并重组出完整的 3000 字节 UDP payload
+
+查看分片字段：
+
+```bash
+tcpdump -r captures/ch11-udp-fragmentation.pcap -nn -e -v
+```
 
 ```bash
 make experiment EXP=ch11-udp-port-unreachable
