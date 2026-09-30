@@ -40,4 +40,26 @@ docker compose exec server ip route
 
 `ch09-longest-prefix` 中，client 同时有默认路由和 `10.0.2.0/24` 路由。对 `10.0.2.10` 的查询应选择更长的 `/24` 路由。
 
-`ch09-missing-route` 中，client 没有到 server 的路由，ping 应失败，抓包中不会出现经过 router 的有效 ICMP 请求。
+## 第 11 章实验
+
+### UDP 单播
+
+```bash
+make experiment EXP=ch11-udp-unicast
+```
+
+这个实验使用 client 向 server 的 UDP/9000 发送一段文本。router 的 client 侧接口只抓 UDP 报文，结果保存为 `captures/ch11-udp-unicast.pcap`。
+
+预期观察：
+
+- UDP 没有握手过程
+- 报文包含源端口、目的端口和长度
+- IPv4 目的地址保持为 `10.0.2.10`
+- 报文经过 router 后 TTL 减少
+- 每个二层网络的 Ethernet 地址不同
+
+查看报文：
+
+```bash
+tcpdump -r captures/ch11-udp-unicast.pcap -nn -e -X
+```
