@@ -21,13 +21,14 @@ check:
 local-build:
 	cargo build
 
-experiment: build
+experiment:
 	@if command -v cargo >/dev/null 2>&1; then \
-		cargo run -- $(EXP); \
+		cargo build && docker compose build && ./target/debug/netlab $(EXP); \
 	else \
 		docker run --rm \
 			-v "$(PWD):/work" \
 			-w /work rust:1.82-bookworm \
 			bash -c 'cargo build' && \
+		docker compose build && \
 		./target/debug/netlab $(EXP); \
 	fi

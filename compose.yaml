@@ -9,6 +9,18 @@ services:
       net_client:
         ipv4_address: 10.0.1.10
 
+  multicast_receiver:
+    build: ./docker/lab
+    command: ["sleep", "infinity"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./target/debug/netlab:/netlab:ro
+    networks:
+      net_client:
+        ipv4_address: 10.0.1.11
+
   router:
     build: ./docker/lab
     privileged: true

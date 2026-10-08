@@ -97,7 +97,43 @@ make experiment EXP=ch11-udp-port-unreachable
 查看抓包：
 
 
-## 第 17、18 章实验
+## 第 12、13 章实验
+
+### IPv4 多播和 IGMP
+
+```bash
+make experiment EXP=ch12-multicast
+make experiment EXP=ch13-igmp
+```
+
+`multicast_receiver` 与 client 位于同一二层网络。receiver 使用 Rust `UdpSocket::join_multicast_v4` 加入 `239.1.1.1`，client 发送 UDP/9008，router 的 client 侧接口抓取 IGMP 和 UDP。两个实验分别保存为 `ch12-multicast.pcap` 与 `ch13-igmp.pcap`。
+
+预期观察：
+
+- receiver 加组时产生 IGMPv3 Membership Report
+- IPv4 组播地址 `239.1.1.1` 映射到 Ethernet 地址 `01:00:5e:01:01:01`
+- client 发送 TTL 为 1 的 UDP 组播数据，加入组的 receiver 收到数据
+- Docker bridge 实验说明同一二层组播，不代表跨路由组播转发
+
+查看报文：
+
+```bash
+tcpdump -r captures/ch12-multicast.pcap -nn -e -v
+```
+
+## 第 8、19、22、24 章实验
+
+```bash
+make experiment EXP=ch08-traceroute
+make experiment EXP=ch19-tcp-interactive
+make experiment EXP=ch22-tcp-zero-window
+make experiment EXP=ch24-tcp-options
+make experiment EXP=ch24-pmtud
+make experiment EXP=ch21-congestion-control
+```
+
+这些实验分别抓取 TTL 超时、TCP 小数据交互、接收窗口变化、SYN 选项、降低 MTU 后的 TCP 传输，以及拥塞控制大流。对应 pcap 位于 `captures/`；使用 `tcpdump -r ... -nn -e -v` 查看 TTL、MSS、窗口扩大、时间戳、SACK 和重传字段。零窗口是否出现取决于宿主机内核和 socket 缓冲区，拥塞控制实验使用当前内核默认算法，需配合 `ss -ti` 或修改容器内 `net.ipv4.tcp_congestion_control` 做 Reno/CUBIC 对比。
+
 
 ### TCP 三次握手
 
