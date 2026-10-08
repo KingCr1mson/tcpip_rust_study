@@ -5,6 +5,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+// 容器名、地址和端口集中定义，实验函数通过这些常量拼出 docker compose 命令。
+// 端口分配固定，便于从抓包中识别当前实验。
 const CLIENT: &str = "client";
 const ROUTER: &str = "router";
 const SERVER: &str = "server";
@@ -33,6 +35,8 @@ const TCP_CONGESTION_PORT: &str = "9013";
 const TCP_ZERO_WINDOW_SIZE: &str = "4194304";
 const TCP_CONGESTION_SIZE: &str = "4194304";
 const UDP_MESSAGE: &str = "netlab udp chapter 11\n";
+
+// Rust 程序入口：args().nth(1) 取得第一个命令行参数。Option 表示参数可能不存在。
 fn main() {
     let scenario = match env::args().nth(1) {
         Some(value) => value,
@@ -43,11 +47,13 @@ fn main() {
     };
 
     if let Err(error) = run(&scenario) {
+        // 统一把实验错误输出到 stderr，并以非零状态退出，便于脚本判断失败。
         eprintln!("实验失败: {error}");
         std::process::exit(1);
     }
 }
 
+// 根据实验名分发到具体函数；返回 Result 让错误沿调用链传回 main。
 fn run(scenario: &str) -> Result<(), String> {
     if scenario == "multicast-receiver" {
         return run_multicast_receiver();
@@ -107,6 +113,7 @@ fn run(scenario: &str) -> Result<(), String> {
     configure_routes(scenario)?;
 
     let route = run_command_output("docker", &["compose", "exec", "-T", CLIENT, "ip", "route", "get", SERVER_IP]);
+    // route 是 Result：成功时得到路由文本，失败时可能正是“无路由”实验的预期。
     match (scenario == "ch09-missing-route", route) {
         (true, Ok(value)) => return Err(format!("没有路由时却找到了路由: {}", value.trim())),
         (true, Err(_)) => println!("client 的路由选择: 无可用路由"),
@@ -127,6 +134,7 @@ fn run(scenario: &str) -> Result<(), String> {
         .map_err(|error| format!("无法启动抓包: {error}"))?;
 
     thread::sleep(Duration::from_secs(1));
+    // 给 tcpdump 一点启动时间，避免极短流量在抓包进程就绪前结束。
     let ping_status = Command::new("docker")
         .args(["compose", "exec", "-T", CLIENT, "ping", "-c", "1", "-W", "2", SERVER_IP])
         .status()
@@ -152,6 +160,7 @@ fn run(scenario: &str) -> Result<(), String> {
     Ok(())
 }
 
+// UDP 单播：先抓包，再启动 listener，最后发送数据报。
 fn run_udp_unicast() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -202,6 +211,7 @@ fn run_udp_unicast() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -X 查看 UDP 数据");
     Ok(())
 }
+// server 不监听目标端口时，Linux UDP 栈会生成 ICMP Port Unreachable。
 fn run_udp_port_unreachable() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -233,6 +243,7 @@ fn run_udp_port_unreachable() -> Result<(), String> {
     }
 
     let packets = run_command_output("tcpdump", &["-r", capture_path, "-nn"])?;
+    // 解析工作交给 tcpdump，Rust 只检查本实验关心的关键词。
     let has_udp = packets.contains("UDP") || packets.contains("udp");
     let has_icmp = packets.contains("unreachable") || packets.contains("ICMP");
     if !has_udp || !has_icmp {
@@ -244,6 +255,7 @@ fn run_udp_port_unreachable() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e 查看 UDP 和 ICMP");
     Ok(())
 }
+// 降低 MTU，使一个大的 UDP 数据报需要 IPv4 分片。
 fn run_udp_fragmentation() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -301,6 +313,7 @@ fn run_udp_fragmentation() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看分片字段");
     Ok(())
 }
+// 先启动 tcpdump，确保最初的 SYN 也进入 pcap。
 fn run_tcp_handshake() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -359,6 +372,7 @@ fn run_tcp_handshake() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看 TCP 首部");
     Ok(())
 }
+// client 发送完后关闭写方向，server 读到 EOF，便于观察 FIN 交换。
 fn run_tcp_close() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -416,6 +430,7 @@ fn run_tcp_close() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看连接终止");
     Ok(())
 }
+// 目标端口没有 listener，连接请求由 server 内核用 RST 拒绝。
 fn run_tcp_reset() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -458,6 +473,7 @@ fn run_tcp_reset() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看 TCP RST");
     Ok(())
 }
+// 用大块字节流观察 TCP 序列空间、累计 ACK 和接收窗口。
 fn run_tcp_stream() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -516,6 +532,7 @@ fn run_tcp_stream() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看 sequence、ack 和 window");
     Ok(())
 }
+// 注入丢包，比较原始段和重传段的序列号。
 fn run_tcp_retransmission() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -593,6 +610,7 @@ fn run_tcp_retransmission() -> Result<(), String> {
     println!("可以使用 tcpdump -r {capture_path} -nn -e -v 查看重传间隔");
     Ok(())
 }
+// TTL=1 会强制第一个三层转发点返回 ICMP Time Exceeded。
 fn run_traceroute() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -613,6 +631,7 @@ fn run_traceroute() -> Result<(), String> {
     Ok(())
 }
 
+// 多个实验共享同一流程；&str 是借用的字符串切片，不转移调用者的所有权。
 fn run_tcp_pattern(name: &str, port: &str, payload: &str, label: &str) -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?; configure_router()?; configure_routes("ch09-default-route")?;
     let path = format!("captures/{name}.pcap");
@@ -637,6 +656,7 @@ fn run_tcp_pattern(name: &str, port: &str, payload: &str, label: &str) -> Result
     Ok(())
 }
 
+// 大数据流用于观察窗口；是否真的出现 win 0 取决于内核缓冲区。
 fn run_zero_window() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?; configure_router()?; configure_routes("ch09-default-route")?;
     let path = "captures/ch22-tcp-zero-window.pcap";
@@ -658,6 +678,7 @@ fn run_zero_window() -> Result<(), String> {
     println!("验证通过: TCP 大数据流已抓取，可搜索 win 0、zero-window probe 或窗口收缩"); println!("抓包文件: {path}"); println!("抓包摘要包含窗口字段: {}", packets.contains("win")); Ok(())
 }
 
+// MTU 是临时实验状态，结束时尝试恢复为 1500。
 fn run_pmtud() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?; configure_router()?; configure_routes("ch09-default-route")?;
     run_command("docker", &["compose", "exec", "-T", CLIENT, "ip", "link", "set", "dev", "eth0", "mtu", "1200"])?;
@@ -666,6 +687,7 @@ fn run_pmtud() -> Result<(), String> {
     result
 }
 
+// 抓取大 TCP 流供分析；拥塞算法使用容器内核当前配置。
 fn run_congestion_control() -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?; configure_router()?; configure_routes("ch09-default-route")?;
     let path = "captures/ch21-congestion-control.pcap";
@@ -684,6 +706,7 @@ fn run_congestion_control() -> Result<(), String> {
     println!("验证通过: 已抓取 TCP 大流量，可用 ss -ti 和 tcpdump 分析 cwnd、rtt、重传"); println!("抓包文件: {path}"); Ok(())
 }
 
+// receiver 先加入组，sender 再发送，避免错过唯一的组播数据报。
 fn run_multicast(igmp_only: bool) -> Result<(), String> {
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
@@ -748,6 +771,7 @@ fn run_multicast(igmp_only: bool) -> Result<(), String> {
     Ok(())
 }
 
+// 在 receiver 容器中调用 join_multicast_v4，请求 Linux 内核交付该组 UDP 数据。
 fn run_multicast_receiver() -> Result<(), String> {
     let group: Ipv4Addr = MULTICAST_GROUP
         .parse()
@@ -757,6 +781,7 @@ fn run_multicast_receiver() -> Result<(), String> {
         .map_err(|error| format!("绑定组播端口失败: {error}"))?;
     socket
         .join_multicast_v4(&group, &local)
+        // ? 会在失败时提前返回，并保留我们补充的错误上下文。
         .map_err(|error| format!("加入组播组失败: {error}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(8)))
@@ -769,6 +794,7 @@ fn run_multicast_receiver() -> Result<(), String> {
     Ok(())
 }
 
+// 启动容器前拒绝未知实验名，避免拼写错误造成误操作。
 fn check_scenario(scenario: &str) -> Result<(), String> {
     match scenario {
         "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch08-traceroute" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" | "ch17-tcp-handshake" | "ch18-tcp-close" | "ch18-tcp-reset" | "ch19-tcp-interactive" | "ch20-tcp-stream" | "ch21-tcp-retransmission" | "ch21-congestion-control" | "ch22-tcp-zero-window" | "ch24-tcp-options" | "ch24-pmtud" | "ch12-multicast" | "ch13-igmp" => Ok(()),
@@ -776,11 +802,13 @@ fn check_scenario(scenario: &str) -> Result<(), String> {
     }
 }
 
+// router 默认不一定转发 IPv4 包，这里显式打开内核转发开关。
 fn configure_router() -> Result<(), String> {
     run_command("docker", &["compose", "exec", "-T", ROUTER, "sysctl", "-w", "net.ipv4.ip_forward=1"])?;
     Ok(())
 }
 
+// 先清理上一次实验留下的路由，让每次实验从可预测状态开始。
 fn configure_routes(scenario: &str) -> Result<(), String> {
     run_command_allow_failure("docker", &["compose", "exec", "-T", CLIENT, "ip", "route", "del", "default"]);
     run_command_allow_failure("docker", &["compose", "exec", "-T", CLIENT, "ip", "route", "del", "10.0.2.0/24", "via", ROUTER_CLIENT_IP]);
@@ -797,17 +825,20 @@ fn configure_routes(scenario: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Command 分离传递程序名和参数，不经过 shell 字符串拆分。
 fn run_command(program: &str, args: &[&str]) -> Result<(), String> {
     let status = Command::new(program)
         .args(args)
         .status()
         .map_err(|error| format!("执行 {program} 失败: {error}"))?;
     if !status.success() {
+        // 子进程退出码不是 Rust 的 Result，因此手动转换为可读错误。
         return Err(format!("命令失败: {program} {}", args.join(" ")));
     }
     Ok(())
 }
 
+// 清理命令在目标不存在时失败是正常的，因此有意忽略退出码。
 fn run_command_allow_failure(program: &str, args: &[&str]) {
     let _ = Command::new(program)
         .args(args)
@@ -815,6 +846,7 @@ fn run_command_allow_failure(program: &str, args: &[&str]) {
         .status();
 }
 
+// 等待外部命令结束并收集 stdout，再转换为拥有所有权的 String。
 fn run_command_output(program: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new(program)
         .args(args)

@@ -1,0 +1,60 @@
+# 第 11 章：UDP
+
+## 学习目标
+
+观察 UDP 无连接数据报、端口不可达和 IPv4 分片，理解 UDP 首部与 IP 分片的边界。
+
+## 实验入口
+
+```bash
+make experiment EXP=ch11-udp-unicast
+make experiment EXP=ch11-udp-port-unreachable
+make experiment EXP=ch11-udp-fragmentation
+```
+
+## UDP 单播
+
+client 使用 `nc -u` 向 `10.0.2.10:9000` 发送文本，server 使用 UDP listener 接收。UDP 没有 SYN、ACK 或连接建立阶段；应用直接交给内核一个独立数据报。
+
+重点观察：
+
+- IPv4 `protocol 17` 表示 UDP。
+- UDP 首部包含源端口、目的端口、长度和校验和。
+- 目标 IP 始终是 server；经过 router 时只有 TTL 和二层 MAC 改变。
+- 一个 UDP 数据报对应一个发送操作，但底层还可能发生分片。
+
+## UDP 端口不可达
+
+server 不监听 UDP/9001。server 收到数据报后，由内核生成 ICMP Destination Unreachable，代码为 Port Unreachable。ICMP 负载会携带原始 IP 首部和 UDP 首部前若干字节，使发送端知道哪个 UDP 流失败。
+
+```bash
+tcpdump -r captures/ch11-udp-port-unreachable.pcap -nn -e -v
+```
+
+先找 client 到 server 的 UDP，再找反向的 ICMP。ICMP 不是 UDP 的“握手”，而是异步错误通知。
+
+## IPv4 分片
+
+程序把 client 的 MTU 降到 1200，并发送 3000 字节 UDP 数据报：
+
+```bash
+make experiment EXP=ch11-udp-fragmentation
+tcpdump -r captures/ch11-udp-fragmentation.pcap -nn -e -v
+```
+
+IP 层会把一个大 datagram 拆成多个 fragment。所有分片共享 Identification：
+
+- 首片包含 UDP 首部。
+- Fragment Offset 表示该片在原 IP payload 中的位置，单位是 8 字节。
+- 除最后一片外，More Fragments 标志为 1。
+- server 按 Identification、源/目的地址和协议号重组后，才交给 UDP。
+
+注意：分片发生在 IP 层，UDP 首部不会出现在每一个分片里；抓包工具显示的“UDP 长度”只对首片有意义。
+
+## 协议对应
+
+```text
+Ethernet -> IPv4 -> UDP -> 应用文本
+                       |
+                       +-- 无监听端口时触发 ICMP 错误
+```
