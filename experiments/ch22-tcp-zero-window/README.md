@@ -32,3 +32,9 @@ client 向 TCP/9010 发送 4 MiB 数据，server 接收进程输出丢弃，rout
 ## 概念对应
 
 坚持定时器不是 TCP keep-alive，也不是丢包重传：它专门解决“对端窗口为零或窗口更新可能丢失”的暂停发送问题。
+
+## 代码与 Docker 操作
+
+`run_zero_window()` 启动 router 抓 TCP/9010，并在 server 执行 `timeout 8 nc -l -p 9010 >/dev/null`；client 执行 `head -c 4194304 /dev/zero | nc -w 8 10.0.2.10 9010`。server 把数据丢到 `/dev/null`，避免终端显示大量内容，但它仍会读取 socket，所以不保证出现零窗口。
+
+Rust 等待进程、读取 pcap 摘要并打印是否包含 `win`。它不把 `win 0` 作为硬性成功条件，因为接收缓冲区和内核调度可能让窗口很快重新打开；要稳定研究坚持探测，需要故意不读取 socket 的 server。

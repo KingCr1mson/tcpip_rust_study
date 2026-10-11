@@ -42,3 +42,11 @@ Reno、NewReno、CUBIC 等算法改变的是拥塞窗口增长和丢包后的退
 - 接收窗口 `rwnd`：接收端还有多少缓存空间。
 - 拥塞窗口 `cwnd`：发送端根据网络拥塞估计允许飞行的数据量。
 - 实际发送窗口：通常受两者较小值限制。
+
+## 代码与 Docker 操作
+
+重传由 `run_tcp_retransmission()` 实现：router 抓 TCP/9007，server 执行 `timeout 12 nc -l -p 9007 | wc -c`，client 执行 `(sleep 2; head -c 65536 /dev/zero) | nc -w 10 10.0.2.10 9007`。client 启动后，Rust 在 router 的 `eth1` 上执行 `tc qdisc add dev eth1 root netem loss 100%`，三秒后执行删除命令恢复链路。
+
+代码读取 server 的字节计数，再把 tcpdump 的非空 TCP 数据行放入 `Vec<&str>`，比较各行的 `seq` 文本，寻找重复序列号作为重传证据。清理 qdisc 使用 `run_command_allow_failure()`，因为删除一个已经不存在的 qdisc 也可以安全忽略。
+
+拥塞控制由 `run_congestion_control()` 实现，使用 TCP/9013 和 4 MiB 数据。它只负责生成大流和 pcap；cwnd、RTT 等需要用 tcpdump 或容器内 `ss -ti` 观察。

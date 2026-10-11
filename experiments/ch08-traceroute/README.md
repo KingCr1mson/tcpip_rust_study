@@ -55,3 +55,15 @@ tcpdump -r captures/ch08-traceroute.pcap -nn -e -v
 ## 注意事项
 
 Docker bridge、内核版本和 ping 实现可能影响显示字段，但“TTL 耗尽后由 router 返回 ICMP Time Exceeded”是本实验的核心。
+
+## 代码与 Docker 操作
+
+入口是 `src/main.rs` 的 `run_traceroute()`。它先调用 `docker compose up -d` 启动拓扑，再由 `configure_router()` 在 router 中执行 `sysctl -w net.ipv4.ip_forward=1`，由 `configure_routes()` 设置经过 router 的默认路由。
+
+Rust 随后创建 pcap，并用 `Command::spawn()` 启动：
+
+```text
+docker compose exec -T router sh -c "timeout 8 tcpdump -i eth0 -U -w - 'icmp or udp'"
+```
+
+`.stdout(Stdio::from(file))` 把 tcpdump 的标准输出直接接到 `captures/ch08-traceroute.pcap`。等待一秒后，Rust 执行 `docker compose exec -T client ping -c 1 -t 1 10.0.2.10`。最后用 `Child::wait()` 等待抓包结束，再调用宿主机的 `tcpdump -r`，用 `contains("time exceeded")` 检查摘要。

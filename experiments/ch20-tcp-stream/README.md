@@ -31,3 +31,9 @@ TCP 把连续字节放入发送窗口，允许多个数据段在没有逐段等�
 ## 接收验证
 
 Rust 控制程序让 server 统计收到的字节数，必须得到 `1048576`，因此抓包中的 TCP 分段最终在接收端重组为完整字节流。
+
+## 代码与 Docker 操作
+
+`run_tcp_stream()` 在 router 抓 `tcp port 9006`，在 server 中执行 `timeout 8 nc -l -p 9006 | wc -c`，在 client 中执行 `head -c 1048576 /dev/zero | nc -w 5 10.0.2.10 9006`。`head` 产生固定数量的零字节，`wc -c` 把 server 收到的字节数打印到 stdout，Rust 用 `wait_with_output()` 读取并比较常量 `TCP_STREAM_SIZE`。
+
+抓包结束后，程序调用 tcpdump 统计含非零 `length` 的数据段和 ACK。统计来自文本行数，只用于确认确实产生了成块 TCP 流量。

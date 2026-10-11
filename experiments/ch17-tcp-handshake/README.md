@@ -40,3 +40,9 @@ SYN 各消耗一个序列号，因此第三个 ACK 的确认号通常是 server 
 ## 可靠性边界
 
 TCP 保证的是有序字节流，不保留应用层的“消息边界”。本实验发送一行文本只是便于验证，不应把一次 `printf` 等同于网络上的一个 TCP 包；内核可以合并或拆分写入内容。
+
+## 代码与 Docker 操作
+
+`run_tcp_handshake()` 先让 router 执行 `tcpdump -i eth0 -U -w - 'tcp port 9003'`，再启动 server 的 `nc -l -p 9003` 和 client 的 `printf 'tcp handshake chapter 17\n' | nc -w 2 10.0.2.10 9003`。Rust 用 `spawn()` 让抓包和 server 后台运行，用 `wait_with_output()` 读取 server 收到的文本。
+
+结束后程序执行 `tcpdump -r ... -nn`，用 `contains("Flags [S]")`、`contains("Flags [S.]")` 和 `contains("Flags [.]")` 检查 SYN、SYN/ACK、ACK。真正的 TCP 字段解析由 tcpdump 完成，Rust 这里只做教学用字符串验证。

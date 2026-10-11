@@ -33,3 +33,9 @@ client 通过 TCP/9009 发送几个很小的文本片段，server 使用 `nc` �
 ```
 
 不要把应用换行符、`printf` 调用或 `nc` 的一次读取直接当作 TCP 报文边界。
+
+## 代码与 Docker 操作
+
+该场景调用 `run_tcp_pattern("ch19-tcp-interactive", TCP_INTERACTIVE_PORT, "printf 'a\\nb\\nc\\n'", "交互式小数据流")`。共享函数负责 router 抓 `tcp port 9009`、server 执行 `nc -l -p 9009`，以及 client 执行 `printf 'a\nb\nc\n' | nc -w 2 10.0.2.10 9009`。
+
+`payload` 是交给 client 容器 shell 执行的字符串，`port` 同时决定抓包过滤器和两端 nc 端口。Rust 只检查 client 成功、server stdout 非空并保存 pcap，不假设三个换行对应三个 TCP 段。

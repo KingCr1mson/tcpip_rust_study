@@ -17,3 +17,9 @@ client 向 server 的 TCP/9005 发起 SYN，而 server 没有监听该端口。L
 - 与正常关闭的 FIN 不同，RST 不提供有序的半关闭过程。
 
 该实验适合理解 TCP 状态机中“收到无法接受的连接请求”这一分支。
+
+## 代码与 Docker 操作
+
+实现位于 `run_tcp_reset()`。Rust 启动 router 的 `tcpdump -i eth0 -U -w - 'tcp port 9005'`，但故意不在 server 启动 `nc -l`。client 执行 `nc -w 2 10.0.2.10 9005`，`status()` 返回失败是预期现象；代码只在 client 意外成功时返回错误。
+
+抓包结束后，`run_command_output("tcpdump", &["-r", path, "-nn"])` 把 pcap 转成文本，检查 `Flags [S]` 和 `Flags [R`。Rust 没有直接解析 pcap 二进制，而是调用 tcpdump 输出摘要，再用字符串方法做验证。

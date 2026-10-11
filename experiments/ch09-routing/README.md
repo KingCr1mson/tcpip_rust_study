@@ -74,3 +74,9 @@ default via 10.0.1.2
 ## 常见误区
 
 默认路由不是“把目的地址改成网关地址”。它只决定二层下一跳；IP 目的地址仍是最终 server。router 也不会因为转发而修改普通 IPv4 包的源、目的地址。
+
+## 代码与 Docker 操作
+
+三个场景都先经过 `check_scenario()` 白名单，然后进入 `run()` 的通用分支。Rust 依次执行 `docker compose up -d`、在 router 中打开 IPv4 转发，并由 `configure_routes()` 删除旧路由后重新添加路由。默认场景添加 `client ip route add default via 10.0.1.2`；最长前缀场景再添加 `client ip route add 10.0.2.0/24 via 10.0.1.2`；无路由场景不添加 client 默认路由。
+
+`run()` 用 `docker compose exec -T client ip route get 10.0.2.10` 读取内核的选路结果。成功场景启动 router 的 tcpdump，再执行 `ping -c 1 -W 2 10.0.2.10`；无路由场景则要求 ping 失败。`run_command()` 检查外部命令退出码，失败时返回 `Err(String)`，调用方的 `?` 会把错误传回 `main`。

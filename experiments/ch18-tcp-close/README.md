@@ -45,3 +45,9 @@ RST 是立即终止或拒绝当前 TCP 状态的控制报文，常见于：
 ## TIME_WAIT
 
 主动关闭方通常进入 TIME_WAIT，以保证旧连接中的延迟报文不会污染后续相同四元组连接，并确保最后 ACK 丢失时仍能重发。它不是“连接还在传数据”，而是 TCP 为可靠终止保留的状态。
+
+## 代码与 Docker 操作
+
+`run_tcp_close()` 抓 `tcp port 9004`，在 server 中执行 `timeout 5 nc -l -p 9004`，在 client 中执行 `printf 'tcp close chapter 18\n' | nc -w 2 10.0.2.10 9004`。client 输入结束后关闭连接，server 读到 EOF 并退出。Rust 读取 server stdout 验证文本，再用 tcpdump 摘要统计 FIN/ACK 和普通 ACK。
+
+同一文件的 `run_tcp_reset()` 不启动 server listener，只执行 `nc -w 2 10.0.2.10 9005`。没有监听者时 Linux 内核返回 RST；Rust 要求 client 失败，并检查 pcap 出现 SYN 和 RST。

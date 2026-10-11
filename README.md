@@ -69,3 +69,39 @@ client 10.0.1.10 -- router -- server 10.0.2.10
 - `Child::wait` 等待外部进程结束
 
 本项目用于观察协议行为和抓包，不用于测量真实高速网卡性能。
+
+## 先看懂一次实验如何运行
+
+在终端运行：
+
+```bash
+make experiment EXP=ch17-tcp-handshake
+```
+
+Makefile 会按顺序完成这些操作：
+
+1. 如果宿主机有 Cargo，就运行 `cargo build`；否则启动 `rust:1.82-bookworm` 容器，在挂载到 `/work` 的项目目录中编译。
+2. 执行 `docker compose build`，根据 `docker/lab/Dockerfile` 构建实验容器镜像。
+3. 运行 `./target/debug/netlab ch17-tcp-handshake`，把实验名称交给 Rust 程序。
+
+Rust 程序中的 `main` 读取实验名称，`run` 负责分发。实验函数使用 `Command::new("docker")` 执行 `docker compose ...`：
+
+- `docker compose up -d` 在后台启动 `compose.yaml` 中的 client、router、server 和网络。
+- `docker compose exec -T client ...` 在已经运行的 client 容器内执行命令；`-T` 表示不分配交互终端。
+- `ip route`、`ping`、`nc`、`tcpdump`、`tc` 等是容器里的 Linux 工具，不是 Rust 函数。
+- `Command::spawn()` 启动一个可以并行运行的子进程；例如先让 tcpdump 抓包，再启动 client 产生流量。
+- `Command::status()` 等待命令结束并检查退出码；`Child::wait_with_output()` 还会收集子进程输出供 Rust 验证。
+
+抓包命令使用 `tcpdump -w -` 把 pcap 字节写到标准输出。Rust 用 `Stdio::from(capture_file)` 将这个输出接到宿主机的 `captures/*.pcap` 文件。这里的 `-` 指 tcpdump 的标准输出，不是文件名。
+
+## Rust 写法速查
+
+- `let name = value;` 创建变量；默认不可变。需要后续调用 `wait()` 修改子进程状态时会写 `let mut child`。
+- `&str` 是借用的字符串切片，`String` 是可拥有和修改的字符串。函数参数写 `scenario: &str` 表示只读取调用方传入的文本。
+- `Result<T, E>` 表示操作成功得到 `T`，或失败得到 `E`。本程序用 `Result<(), String>` 表示实验成功或附带错误文字失败。
+- `Option<T>` 表示值可能缺失。`Some(value)` 是有值，`None` 是无值；命令行参数可能不存在，所以 `env::args().nth(1)` 返回 Option。
+- `?` 在结果为 Err 时立刻从当前函数返回错误；这让文件创建、命令执行等失败能逐层传回 `main`。
+- `&[&str]` 是字符串切片组成的参数列表。把程序名和参数分别传给 `Command`，不需要 shell 帮忙拆分命令行。
+- `format!("端口 {port}")` 按变量内容创建新的 String；`println!` 和 `eprintln!` 分别输出到标准输出和错误输出。
+
+阅读时可以先从 `main` -> `run` -> 对应的 `run_*` 函数开始，再按函数里的容器命令去看 `compose.yaml` 和 `docker/lab/Dockerfile`。每个章节文档都列出了具体函数名和命令。

@@ -5,6 +5,14 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+// 初学者阅读提示：
+// - `const NAME: &str = ...` 定义编译期常量；`&str` 是借用的字符串切片。
+// - 函数返回 `Result<(), String>`，表示成功时没有有用返回值，失败时带一段错误文字。
+// - `?` 用于把失败向上传递；例如 `File::create(...)?` 失败时，当前函数立即返回 Err。
+// - `format!("...{value}...")` 创建新的 String；普通字符串字面量则通常是 `&'static str`。
+// - 本程序不自己实现 TCP/IP，而是用标准库 `Command` 调用 Docker、ping、tcpdump、nc 等工具。
+//   网络行为由 Linux 内核和容器中的命令完成，Rust 负责安排顺序、收集结果和检查抓包。
+
 // 容器名、地址和端口集中定义，实验函数通过这些常量拼出 docker compose 命令。
 // 端口分配固定，便于从抓包中识别当前实验。
 const CLIENT: &str = "client";
@@ -38,6 +46,8 @@ const UDP_MESSAGE: &str = "netlab udp chapter 11\n";
 
 // Rust 程序入口：args().nth(1) 取得第一个命令行参数。Option 表示参数可能不存在。
 fn main() {
+    // `env::args()` 返回命令行参数迭代器；`nth(1)` 取第一个用户参数（第 0 个是程序名）。
+    // `Option<String>` 表示参数可能存在 (Some)，也可能不存在 (None)。
     let scenario = match env::args().nth(1) {
         Some(value) => value,
         None => {
@@ -55,6 +65,8 @@ fn main() {
 
 // 根据实验名分发到具体函数；返回 Result 让错误沿调用链传回 main。
 fn run(scenario: &str) -> Result<(), String> {
+    // `&str` 是对调用者字符串的只读借用，不需要复制整个参数。
+    // 每个专用场景先在这里分流；三个 ch09 路由场景走文件后面的通用分支。
     if scenario == "multicast-receiver" {
         return run_multicast_receiver();
     }
@@ -108,10 +120,14 @@ fn run(scenario: &str) -> Result<(), String> {
     }
 
     check_scenario(scenario)?;
+    // `&[&str]` 是命令参数切片。每个参数单独传入，不需要 Rust 自己拆分 shell 字符串。
+    // `docker compose up -d` 在后台创建/启动 compose.yaml 里定义的容器和网络。
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
     configure_routes(scenario)?;
 
+    // `docker compose exec -T client ...` 在已运行的 client 容器里执行命令；`-T` 关闭伪终端，
+    // 适合由 Rust 捕获输出或把 stdin/stdout 接到管道的非交互式任务。
     let route = run_command_output("docker", &["compose", "exec", "-T", CLIENT, "ip", "route", "get", SERVER_IP]);
     // route 是 Result：成功时得到路由文本，失败时可能正是“无路由”实验的预期。
     match (scenario == "ch09-missing-route", route) {
@@ -123,16 +139,21 @@ fn run(scenario: &str) -> Result<(), String> {
 
     let capture_path = format!("captures/{scenario}.pcap");
     println!("抓包文件: {capture_path}");
+    // File::create 会新建文件；同名文件存在时会截断旧内容。`&capture_path` 借用路径字符串。
     let capture_file = File::create(&capture_path)
         .map_err(|error| format!("无法创建抓包文件 {capture_path}: {error}"))?;
 
+    // Command 用于逐项构造外部进程。`spawn()` 立即启动并返回 Child，
+    // 所以 Rust 可以在 tcpdump 抓包期间继续启动 ping，而不是等抓包结束。
     let mut capture = Command::new("docker")
         .args(["compose", "exec", "-T", ROUTER, "sh", "-c"])
         .arg("timeout 8 tcpdump -i eth0 -U -w -")
+        // 把子进程 stdout 直接接到 pcap 文件：Docker exec 输出的是 tcpdump 的抓包字节流。
         .stdout(Stdio::from(capture_file))
         .spawn()
         .map_err(|error| format!("无法启动抓包: {error}"))?;
 
+    // 给 tcpdump 完成启动的时间；这是实验编排中的固定等待，不是协议定时器。
     thread::sleep(Duration::from_secs(1));
     // 给 tcpdump 一点启动时间，避免极短流量在抓包进程就绪前结束。
     let ping_status = Command::new("docker")
@@ -140,6 +161,7 @@ fn run(scenario: &str) -> Result<(), String> {
         .status()
         .map_err(|error| format!("无法发送 ping: {error}"))?;
 
+    // `wait()` 回收子进程并等待它结束；只关心退出状态，不需要读取它的 stdout。
     capture
         .wait()
         .map_err(|error| format!("等待抓包结束失败: {error}"))?;
@@ -162,6 +184,7 @@ fn run(scenario: &str) -> Result<(), String> {
 
 // UDP 单播：先抓包，再启动 listener，最后发送数据报。
 fn run_udp_unicast() -> Result<(), String> {
+    // 各网络实验采用相同准备顺序：启动拓扑、打开 router 转发、配置 client/server 路由。
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
     configure_routes("ch09-default-route")?;
@@ -177,6 +200,7 @@ fn run_udp_unicast() -> Result<(), String> {
         .map_err(|error| format!("无法启动抓包: {error}"))?;
 
     thread::sleep(Duration::from_secs(1));
+    // `spawn()` 让 UDP listener 在后台等数据；stdout 被管道接回 Rust，稍后用于验证收到的文本。
     let server = Command::new("docker")
         .args(["compose", "exec", "-T", SERVER, "sh", "-c"])
         .arg(format!("timeout 5 nc -u -l -p {UDP_PORT}"))
@@ -185,12 +209,14 @@ fn run_udp_unicast() -> Result<(), String> {
         .map_err(|error| format!("无法启动 UDP 服务: {error}"))?;
 
     thread::sleep(Duration::from_secs(1));
+    // `status()` 等待这次发送命令结束，只保留成功/失败状态，不捕获标准输出。
     let client = Command::new("docker")
         .args(["compose", "exec", "-T", CLIENT, "sh", "-c"])
         .arg(format!("printf '{UDP_MESSAGE}' | nc -u -w 2 {SERVER_IP} {UDP_PORT}"))
         .status()
         .map_err(|error| format!("无法发送 UDP 数据: {error}"))?;
 
+    // Child::wait_with_output 等待 server 进程退出，并一次性读取它的 stdout/stderr。
     let output = server
         .wait_with_output()
         .map_err(|error| format!("等待 UDP 服务失败: {error}"))?;
@@ -633,6 +659,8 @@ fn run_traceroute() -> Result<(), String> {
 
 // 多个实验共享同一流程；&str 是借用的字符串切片，不转移调用者的所有权。
 fn run_tcp_pattern(name: &str, port: &str, payload: &str, label: &str) -> Result<(), String> {
+    // 参数分别是抓包文件名、TCP 端口、容器内要执行的发送命令和给人的说明文字。
+    // 多个实验复用这个函数，避免每个短 TCP 流都重复写同一套抓包/服务端/客户端流程。
     run_command("docker", &["compose", "up", "-d"])?; configure_router()?; configure_routes("ch09-default-route")?;
     let path = format!("captures/{name}.pcap");
     let file = File::create(&path).map_err(|e| format!("创建抓包文件失败: {e}"))?;
@@ -708,6 +736,7 @@ fn run_congestion_control() -> Result<(), String> {
 
 // receiver 先加入组，sender 再发送，避免错过唯一的组播数据报。
 fn run_multicast(igmp_only: bool) -> Result<(), String> {
+    // bool 参数区分第 12 章（还验证数据交付）和第 13 章（重点验证 IGMP 报告）。
     run_command("docker", &["compose", "up", "-d"])?;
     configure_router()?;
     configure_routes("ch09-default-route")?;
@@ -773,6 +802,8 @@ fn run_multicast(igmp_only: bool) -> Result<(), String> {
 
 // 在 receiver 容器中调用 join_multicast_v4，请求 Linux 内核交付该组 UDP 数据。
 fn run_multicast_receiver() -> Result<(), String> {
+    // 此分支不是在宿主机运行，而是由 router/client 编排代码在 receiver 容器内调用。
+    // UdpSocket、Ipv4Addr、Duration 都来自 Rust 标准库，不需要额外 crate。
     let group: Ipv4Addr = MULTICAST_GROUP
         .parse()
         .map_err(|error| format!("组播地址无效: {error}"))?;
@@ -796,6 +827,7 @@ fn run_multicast_receiver() -> Result<(), String> {
 
 // 启动容器前拒绝未知实验名，避免拼写错误造成误操作。
 fn check_scenario(scenario: &str) -> Result<(), String> {
+    // 显式白名单可在启动 Docker 前拦截拼错的实验名。
     match scenario {
         "ch09-default-route" | "ch09-longest-prefix" | "ch09-missing-route" | "ch08-traceroute" | "ch11-udp-unicast" | "ch11-udp-port-unreachable" | "ch11-udp-fragmentation" | "ch17-tcp-handshake" | "ch18-tcp-close" | "ch18-tcp-reset" | "ch19-tcp-interactive" | "ch20-tcp-stream" | "ch21-tcp-retransmission" | "ch21-congestion-control" | "ch22-tcp-zero-window" | "ch24-tcp-options" | "ch24-pmtud" | "ch12-multicast" | "ch13-igmp" => Ok(()),
         _ => Err(format!("未知实验: {scenario}")),
@@ -810,6 +842,8 @@ fn configure_router() -> Result<(), String> {
 
 // 先清理上一次实验留下的路由，让每次实验从可预测状态开始。
 fn configure_routes(scenario: &str) -> Result<(), String> {
+    // Compose 网络会自动设置容器接口和直连网段，但本实验显式调整默认路由，
+    // 以便展示默认路由、最长前缀和无路由三种情况。先删除旧项使重复运行可预测。
     run_command_allow_failure("docker", &["compose", "exec", "-T", CLIENT, "ip", "route", "del", "default"]);
     run_command_allow_failure("docker", &["compose", "exec", "-T", CLIENT, "ip", "route", "del", "10.0.2.0/24", "via", ROUTER_CLIENT_IP]);
     run_command_allow_failure("docker", &["compose", "exec", "-T", SERVER, "ip", "route", "del", "default"]);
@@ -827,6 +861,7 @@ fn configure_routes(scenario: &str) -> Result<(), String> {
 
 // Command 分离传递程序名和参数，不经过 shell 字符串拆分。
 fn run_command(program: &str, args: &[&str]) -> Result<(), String> {
+    // `Command::status()` 等待程序结束并取得退出状态；Unix 命令通常以 0 表示成功。
     let status = Command::new(program)
         .args(args)
         .status()
@@ -840,6 +875,7 @@ fn run_command(program: &str, args: &[&str]) -> Result<(), String> {
 
 // 清理命令在目标不存在时失败是正常的，因此有意忽略退出码。
 fn run_command_allow_failure(program: &str, args: &[&str]) {
+    // 用于“删除可能不存在的旧路由/qdisc”等清理操作：失败也不阻断后续实验。
     let _ = Command::new(program)
         .args(args)
         .stderr(Stdio::null())
@@ -848,6 +884,7 @@ fn run_command_allow_failure(program: &str, args: &[&str]) {
 
 // 等待外部命令结束并收集 stdout，再转换为拥有所有权的 String。
 fn run_command_output(program: &str, args: &[&str]) -> Result<String, String> {
+    // `output()` 同时捕获 stdout、stderr 并等待退出；这里把 stdout 按 UTF-8 有损转换成 String。
     let output = Command::new(program)
         .args(args)
         .output()

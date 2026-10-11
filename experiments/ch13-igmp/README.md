@@ -42,3 +42,9 @@ IGMP 位于 IPv4 之上，通常看到：
 ## 注意事项
 
 Linux 版本可能发送 IGMPv2 或 IGMPv3，时间点和报告次数也可能不同。程序检查抓包中是否出现 IGMP，不把具体版本写死。
+
+## 代码与 Docker 操作
+
+本实验调用同一个 `run_multicast(true)`，启动顺序与第 12 章相同：router 抓 `igmp or udp`，receiver 容器执行 `/netlab multicast-receiver`，client 发送 UDP/9008。布尔参数 `true` 使程序使用 `captures/ch13-igmp.pcap`，并在 tcpdump 摘要中额外检查 `IGMP`。
+
+第 13 章重点验证 `UdpSocket::join_multicast_v4()` 触发的内核成员报告；它不把 receiver 是否收到应用数据作为主要断言。对照 `run_multicast(false)` 可以看到同一个函数如何通过参数复用两章实验的公共流程。

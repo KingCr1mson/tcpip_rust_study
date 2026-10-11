@@ -52,3 +52,9 @@ receiver 加入组时，内核建立组播成员关系，并向本地网络发�
 ## 限制
 
 Docker bridge 中的组播行为受 bridge、网卡过滤和内核配置影响；本实验说明的是同一二层网络的组播接收，不等于完整的 PIM/IGMP snooping 路由网络。
+
+## 代码与 Docker 操作
+
+入口是 `run_multicast(false)`。它尝试在 client 中执行 `ip route add 239.0.0.0/8 dev eth0`，让组播地址走本地接口，然后在 router 上执行 `tcpdump -i eth0 -U -w - 'igmp or udp'`。
+
+Rust 启动 `docker compose exec -T multicast_receiver /netlab multicast-receiver`。receiver 容器通过 compose 的只读 volume 使用宿主机编译出的程序；`run_multicast_receiver()` 绑定 UDP/9008，调用标准库 `UdpSocket::join_multicast_v4()`，再用 `recv_from()` 等待数据。两秒后 client 执行 `printf ... | nc -u -w 2 239.1.1.1 9008`。主流程用 `wait_with_output()` 读取 receiver 的输出并检查收到的文本。

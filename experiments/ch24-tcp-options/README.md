@@ -45,3 +45,9 @@ MSS 是 TCP payload 建议值，MTU 是链路承载的 IP 包大小，两者不�
 ## 限制
 
 Docker bridge、网卡 offload 和 Linux 内核设置可能让抓包看到的分段与线上物理网卡略有不同。该实验用于理解字段和协商关系，不是精确测量真实高速链路的 PMTUD 性能。
+
+## 代码与 Docker 操作
+
+短连接调用共享函数 `run_tcp_pattern("ch24-tcp-options", TCP_OPTIONS_PORT, "printf 'tcp options\\n'", "TCP 选项协商")`。它在 router 抓 TCP/9011，在 server 执行 `nc -l -p 9011`，在 client 执行 `printf 'tcp options\n' | nc -w 2 10.0.2.10 9011`。
+
+共享函数把抓包路径、端口、发送命令和提示文字作为参数，因此第 19 章和本实验复用一套 Rust 控制流程。结束后它调用 `tcpdump -r path -nn -v`；若本实验输出没有 `wscale`，只打印提示，不让实验失败，因为不同内核和 tcpdump 版本的显示方式可能不同。PMTUD 的代码在 `run_pmtud()`，详见同目录的 `ch24-pmtud/README.md`。

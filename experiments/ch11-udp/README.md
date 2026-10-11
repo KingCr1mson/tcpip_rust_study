@@ -58,3 +58,11 @@ Ethernet -> IPv4 -> UDP -> 应用文本
                        |
                        +-- 无监听端口时触发 ICMP 错误
 ```
+
+## 代码与 Docker 操作
+
+三个场景分别对应 `run_udp_unicast()`、`run_udp_port_unreachable()` 和 `run_udp_fragmentation()`。它们都先启动 compose、打开 router 转发并配置路由。
+
+单播场景由 Rust 启动 router 抓包、server 的 `nc -u -l -p 9000`，再让 client 执行 `printf 'netlab udp chapter 11\n' | nc -u -w 2 10.0.2.10 9000`。server 用 `spawn()` 后台监听，Rust 用 `wait_with_output()` 读取 stdout；`String::from_utf8_lossy()` 将收到的字节转成可搜索文本。
+
+端口不可达场景不启动 server listener，只发送到 UDP/9001，并把抓包过滤器改成 `'udp or icmp'`，然后检查摘要同时包含 UDP 和 ICMP。分片场景额外执行 `client ip link set dev eth0 mtu 1200`，用 `head -c 3000 /dev/zero | nc -u ... 9002` 发送大数据报；server 通过 `wc -c` 输出计数，Rust 检查计数为 3000 并统计至少两个分片行。`head`、`nc`、`wc` 都是容器内 Linux 命令。
