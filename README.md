@@ -105,3 +105,68 @@ Rust 程序中的 `main` 读取实验名称，`run` 负责分发。实验函数�
 - `format!("端口 {port}")` 按变量内容创建新的 String；`println!` 和 `eprintln!` 分别输出到标准输出和错误输出。
 
 阅读时可以先从 `main` -> `run` -> 对应的 `run_*` 函数开始，再按函数里的容器命令去看 `compose.yaml` 和 `docker/lab/Dockerfile`。每个章节文档都列出了具体函数名和命令。
+
+## 推荐的逐步阅读路线
+
+不要一开始就试图读完 900 多行。可以按下面的顺序，每次只理解一个小问题：
+
+1. **先看 Docker 拓扑**：打开 [`compose.yaml`](compose.yaml)，确认四类容器、两个网络和各自的 IP。再看 [`docker/lab/Dockerfile`](docker/lab/Dockerfile)，知道容器里为什么有 `ping`、`nc`、`tcpdump` 和 `tc`。
+2. **只读 Rust 入口**：从 [`src/main.rs`](src/main.rs) 中的 `main` 开始，理解参数从哪里来、错误在哪里打印。接着看同文件中的 `run`，只关注“实验名称如何对应函数”。
+3. **先读最简单的路由实验**：看 `run` 后面的 ch09 通用流程和 `configure_routes`。它没有 server 程序，只有 route、tcpdump 和 ping，最适合理解 `Command`。
+4. **再读 UDP 单播**：看 `run_udp_unicast`，重点追踪三个变量：`capture` 是抓包进程，`server` 是监听进程，`client` 是发送命令。
+5. **再读 TCP 握手**：看 `run_tcp_handshake`，把 server 启动、client 连接和 pcap 中的 SYN/SYN-ACK/ACK 对照起来。
+6. **最后读共享函数和特殊场景**：`run_tcp_pattern` 是短 TCP 实验模板；多播、重传、零窗口和 PMTUD 则是在模板上增加了各自的网络操作。
+
+### 每个实验函数都可以套用同一张流程图
+
+```text
+1. docker compose up -d
+       |
+2. configure_router / configure_routes
+       |
+3. File::create 创建 captures/*.pcap
+       |
+4. Command::spawn 启动 tcpdump（后台运行）
+       |
+5. Command::spawn 启动 server（需要监听时）
+       |
+6. Command::status 启动 client 并等待它结束
+       |
+7. wait / wait_with_output 回收后台进程
+       |
+8. tcpdump -r 解析抓包，Rust 检查文本或退出状态
+```
+
+看到 `?` 时，先把它读成“失败就立即返回”；看到 `spawn()` 时，先问“这个进程为什么要后台运行”；看到 `wait_with_output()` 时，先问“Rust 后面要检查这个进程输出中的什么内容”。这样比一次理解整条方法链更容易。
+
+### 在编辑器里快速定位
+
+在 VS Code 或其他编辑器中打开 `src/main.rs` 后，可以搜索这些关键词：
+
+| 搜索内容 | 你会看到什么 |
+| --- | --- |
+| `fn main` | 程序入口和错误退出 |
+| `fn run(` | 实验名称分发 |
+| `fn run_udp` | 三个 UDP 实验 |
+| `fn run_tcp` | TCP 握手、关闭、重置、数据流和共享模板 |
+| `fn run_multicast` | 组播编排 |
+| `fn configure_` | router 和路由表配置 |
+| `Command::new` | Rust 如何启动 Docker/Linux 命令 |
+| `wait_with_output` | Rust 如何读取 server 输出 |
+| `run_command_output` | Rust 如何把 tcpdump 输出读成 String |
+
+文档中的“代码与 Docker 操作”小节解释实验命令；源文件中的注释解释 Rust 语法。两边一起看时，先看文档中的命令，再回到代码搜索同一条命令里的容器名、端口和函数名。
+
+### 实验导航表
+
+| 实验 | 文档 | Rust 入口 | 主要 Docker/Linux 命令 |
+| --- | --- | --- | --- |
+| IP 选路 | [`ch09-routing`](experiments/ch09-routing/README.md) | `run`、`configure_routes` | `ip route`、`ping` |
+| TTL | [`ch08-traceroute`](experiments/ch08-traceroute/README.md) | `run_traceroute` | `ping -t 1`、`tcpdump` |
+| UDP | [`ch11-udp`](experiments/ch11-udp/README.md) | `run_udp_*` | `nc -u`、`wc -c` |
+| 多播 / IGMP | [`ch12-multicast`](experiments/ch12-multicast/README.md)、[`ch13-igmp`](experiments/ch13-igmp/README.md) | `run_multicast`、`run_multicast_receiver` | `join_multicast_v4`、`nc -u` |
+| TCP 握手/关闭/RST | [`ch17-tcp-handshake`](experiments/ch17-tcp-handshake/README.md)、[`ch18-tcp-close`](experiments/ch18-tcp-close/README.md) | `run_tcp_handshake`、`run_tcp_close`、`run_tcp_reset` | `nc -l`、`nc` |
+| TCP 数据流 | [`ch20-tcp-stream`](experiments/ch20-tcp-stream/README.md) | `run_tcp_stream` | `head`、`nc`、`wc -c` |
+| TCP 重传/拥塞 | [`ch21-tcp-retransmission`](experiments/ch21-tcp-retransmission/README.md) | `run_tcp_retransmission`、`run_congestion_control` | `tc netem`、`ss -ti` |
+| 零窗口 | [`ch22-tcp-zero-window`](experiments/ch22-tcp-zero-window/README.md) | `run_zero_window` | `nc`、`tcpdump` |
+| TCP 选项/PMTUD | [`ch24-tcp-options`](experiments/ch24-tcp-options/README.md)、[`ch24-pmtud`](experiments/ch24-pmtud/README.md) | `run_tcp_pattern`、`run_pmtud` | `ip link mtu`、`nc` |
